@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <title>Conectar WhatsApp</title>
+  <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+</head>
+<body>
+  <h1>Escaneie o QR Code</h1>
+  <input type="text" id="sessionName" placeholder="Nome da sessão (ex: cliente1)" />
+  <button onclick="createSession()">Criar Sessão</button>
+  <br /><br />
+  <img id="qr" width="300" />
+
+  <script>
+    const socket = io('http://localhost:3000');
+
+    function createSession() {
+      const name = document.getElementById('sessionName').value;
+      if (!name) return alert('Digite um nome para a sessão.');
+
+      fetch(`/session/${name}`, { method: 'POST' })
+        .then(res => res.json())
+        .then(data => console.log(data))
+        .catch(err => console.error(err));
+
+      socket.on(`qr-${name}`, (qr) => {
+        document.getElementById('qr').src = qr;
+      });
+    }
+  </script>
+</body>
+</html>

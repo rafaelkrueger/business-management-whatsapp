@@ -1,0 +1,57 @@
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+dist/
+build/
+
+# Logs
+logs
+*.log
+*.pid
+*.seed
+*.pid.lock
+
+# dotenv/env files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Editor configs
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# WPPConnect session data
+tokens/
+*.wwebjs_auth*
+
+# ngrok cache or config
+ngrok.yml
+ngrok.log
+ngrok-stable-*.zip
+
+# DuckDNS script/log
+duckdns/duck.log
+duckdns/duckdns.log
+duckdns/duck.sh
+duckdns.sh
+
+# Optional if using pm2 or process manager
+pids/
+*.pid
+
+# Output from cron jobs or test
+*.out
+*.err
+
+# TypeScript (caso esteja usando)
+*.tsbuildinfo
