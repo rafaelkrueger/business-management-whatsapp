@@ -63,7 +63,7 @@ async function initSession(sessionName) {
           }
 
           try {
-            await axios.post('http://localhost:3005/whatsapp/connected', {
+            await axios.post('https://roktune.duckdns.org/whatsapp/connected', {
               sessionName,
               status: true,
             });
@@ -75,6 +75,7 @@ async function initSession(sessionName) {
       },
       headless: true,
       puppeteerOptions: {
+        executablePath: '/usr/bin/chromium-browser',
         args: [
             '--disable-gpu',
             '--no-sandbox',
