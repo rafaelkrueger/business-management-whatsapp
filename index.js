@@ -9,6 +9,9 @@ const axios = require('axios');
 
 const app = express();
 const server = http.createServer(app);
+const mime = require('mime-types');
+const multer = require('multer');
+const upload = multer({ dest: 'uploads/' });
 const io = socketIO(server, {
   cors: {
     origin: '*',
@@ -16,7 +19,7 @@ const io = socketIO(server, {
 });
 
 app.use(cors());
-app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 app.use(express.static('frontend'));
 
 const sessions = {};
@@ -61,15 +64,36 @@ async function initSession(sessionName) {
             clearTimeout(tokenTimers[sessionName]);
             delete tokenTimers[sessionName];
           }
+          await axios.post('https://roktune.duckdns.org//whatsapp/connected', {
+            sessionName,
+            status: true,
+          });
+          console.log(`📡 Notificação enviada para /whatsapp/connected`);
+        }else if (status === 'notLogged'){
+          await axios.post('https://roktune.duckdns.org//whatsapp/disconnected', {
+            sessionName,
+            status: true,
+          });
+          console.log(`📡 Notificação enviada para /whatsapp/disconnected`);
 
-          try {
-            await axios.post('https://roktune.duckdns.org/whatsapp/connected', {
-              sessionName,
-              status: true,
-            });
-            console.log(`📡 Notificação enviada para /whatsapp/connected`);
-          } catch (err) {
-            console.error('❌ Falha ao notificar conexão:', err.message);
+          // Fecha e remove a sessão da memória
+          if (sessions[sessionName]) {
+            await sessions[sessionName].close();
+            delete sessions[sessionName];
+          }
+
+          // Remove QR code e timer
+          delete qrCodes[sessionName];
+          if (tokenTimers[sessionName]) {
+            clearTimeout(tokenTimers[sessionName]);
+            delete tokenTimers[sessionName];
+          }
+
+          // Remove tokens da pasta
+          const sessionPath = path.join(TOKEN_DIR, sessionName);
+          if (fs.existsSync(sessionPath)) {
+            fs.rmSync(sessionPath, { recursive: true, force: true });
+            console.log(`🧹 Tokens for ${sessionName} removed due to notLogged`);
           }
         }
       },
@@ -122,36 +146,47 @@ app.post('/session/:name', async (req, res) => {
   res.status(201).json({ message: `Sessão ${sessionName} criada` });
 });
 
-app.post('/send-message', async (req, res) => {
-    const { sessionName, phone, message } = req.body;
+app.post('/send-message', upload.single('image'), async (req, res) => {
+  const { sessionName, phone, message } = req.body;
+  const file = req.file;
 
-    if (!sessionName || !phone || !message) {
-      return res.status(400).json({ error: 'sessionName, phone and message are obrigatory.' });
-    }
+  if (!sessionName || !phone || (!message && !file)) {
+    return res.status(400).json({ error: 'sessionName, phone, and either message or image are required.' });
+  }
 
-    const session = sessions[sessionName];
-    if (!session) {
-      return res.status(404).json({ error: `Session ${sessionName} not found or not connected.` });
-    }
+  const session = sessions[sessionName];
+  if (!session) {
+    return res.status(404).json({ error: `Session ${sessionName} not found or not connected.` });
+  }
 
-    const phoneList = Array.isArray(phone) ? phone : [phone];
-    const results = [];
+  const phoneList = Array.isArray(phone) ? phone : [phone];
+  const results = [];
 
-    for (const number of phoneList) {
-      const cleanNumber = number.replace(/[^\d]/g, '');
+  for (const number of phoneList) {
+    const cleanNumber = number.replace(/[^\d]/g, '') + '@c.us';
 
-      try {
-        const result = await session.sendText(`${cleanNumber}@c.us`, message);
-        console.log(`✅ Mensagem enviada para ${cleanNumber}`);
-        results.push({ number: cleanNumber, success: true, result });
-      } catch (error) {
-        console.error(`❌ Erro ao enviar para ${cleanNumber}:`, error.message);
-        results.push({ number: cleanNumber, success: false, error: error.message });
+    try {
+      let result;
+      if (file) {
+        const extension = mime.extension(file.mimetype) || 'jpg';
+        const filePath = file.path;
+        result = await session.sendImage(cleanNumber, filePath, `image.${extension}`, message || '');
+        fs.unlinkSync(filePath);
+        console.log(`📸 Image sent to ${cleanNumber}`);
+      } else {
+        result = await session.sendText(cleanNumber, message);
+        console.log(`✅ Message sent to ${cleanNumber}`);
       }
-    }
 
-    return res.status(200).json({ success: true, results });
-  });
+      results.push({ number: cleanNumber, success: true, result });
+    } catch (error) {
+      console.error(`❌ Failed to send to ${cleanNumber}:`, error);
+      results.push({ number: cleanNumber, success: false, error: error });
+    }
+  }
+
+  return res.status(200).json({ success: true, results });
+});
 
 app.get('/qrcode/:name', (req, res) => {
   const sessionName = req.params.name;
