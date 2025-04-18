@@ -64,13 +64,13 @@ async function initSession(sessionName) {
             clearTimeout(tokenTimers[sessionName]);
             delete tokenTimers[sessionName];
           }
-          await axios.post('https://roktune.duckdns.org//whatsapp/connected', {
+          await axios.post('https://roktune.duckdns.org/whatsapp/connected', {
             sessionName,
             status: true,
           });
           console.log(`📡 Notificação enviada para /whatsapp/connected`);
         }else if (status === 'notLogged'){
-          await axios.post('https://roktune.duckdns.org//whatsapp/disconnected', {
+          await axios.post('https://roktune.duckdns.org/whatsapp/disconnected', {
             sessionName,
             status: true,
           });
