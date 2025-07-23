@@ -1,0 +1,22 @@
+{
+  "90b17041-fd19-4596-bf77-539dce7b992e": [
+    {
+      "label": "Chatbot",
+      "blockType": "whatsappTrigger",
+      "params": {
+        "expectedWhatsappContent": "",
+        "chatbotName": "CHAT_TEST",
+        "expectedStartMessage": "oi"
+      }
+    },
+    {
+      "label": "Whatsapp",
+      "blockType": "whatsapp",
+      "params": {
+        "whatsappContent": "",
+        "message": "123456",
+        "numbers": "5519998433468"
+      }
+    }
+  ]
+}
