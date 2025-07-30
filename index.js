@@ -1,3 +1,5 @@
+const FormData = require('form-data');
+const streamifier = require('streamifier');
 const express = require('express');
 const http = require('http');
 const socketIO = require('socket.io');
@@ -18,6 +20,10 @@ const TOKEN_DIR = path.join(__dirname, 'tokens');
 const sessions = {};
 const qrCodes = {};
 const tokenTimers = {};
+const messageBuffers = {};
+const sendingStatus = {};
+const messageTimers = {};
+const DELAY_MS = 3000;
 
 app.use(cors());
 app.use(express.urlencoded({ extended: true }));
@@ -72,57 +78,93 @@ async function initSession(sessionName) {
 
   sessions[sessionName] = client;
 
-  client.onMessage(async (message) => {
+  client.onMessage((message) => {
+    if (message.isGroupMsg) return;
+
+    const chatId = message.chatId;
+    message.sessionName = sessionName;
+
+    if (!messageBuffers[chatId]) messageBuffers[chatId] = [];
+    messageBuffers[chatId].push(message);
+
+    if (messageTimers[chatId]) clearTimeout(messageTimers[chatId]);
+    messageTimers[chatId] = setTimeout(() => {
+      const buffer = messageBuffers[chatId];
+      if (buffer?.length > 0) {
+        processMessageGroup(buffer, sessionName);
+        messageBuffers[chatId] = [];
+      }
+    }, DELAY_MS);
+  });
+}
+
+async function processMessageGroup(messages, sessionName) {
   const session = sessions[sessionName];
-  const cleanNumber = cleanPhoneNumber(message.chatId);
+  if (!session) return;
+  const chatId = messages[0].chatId;
+  const cleanNumber = cleanPhoneNumber(chatId);
 
-  if (!message.isGroupMsg) {
-    try {
-      await session.startTyping(cleanNumber);
+  await session.startTyping(cleanNumber);
 
-      const res = await axios.post(`https://core.roktune.com/whatsapp/chatbot`, {
-        from: message.from,
-        message: message.content,
-        sessionName: sessionName,
-      });
+  try {
+    const urlsOrMessages = [];
 
-      const data = res.data;
-      if (!Array.isArray(data) && typeof data === 'object') {
-        const keys = Object.keys(data).filter((key) => !isNaN(Number(key)));
+    for (const msg of messages) {
+      if (msg.type === 'image' && msg.mimetype?.startsWith('image/')) {
+        const mediaBuffer = Buffer.from(msg.body, 'base64');
+        const formData = new FormData();
+        formData.append('path', 'whatsapp');
+        const fileStream = streamifier.createReadStream(mediaBuffer);
+        formData.append('file', fileStream, { filename: 'image.jpg' });
 
-        if (keys.length > 0) {
-          for (const key of keys) {
-            const item = data[key];
-            if (!item?.reply) continue;
+        const uploadRes = await axios.post(
+          'http://all-in-one-system-cfe0c681a225.herokuapp.com/shared/image',
+          formData,
+          { headers: formData.getHeaders() }
+        );
 
-            if (item.isImage) {
-              await session.sendImage(cleanNumber, item.reply, 'image', '');
-            } else if (item.isDocument) {
-              await session.sendFile(cleanNumber, item.reply, 'file');
-            } else {
-              await session.sendText(cleanNumber, item.reply);
-            }
-          }
-        }
+        urlsOrMessages.push(uploadRes.data.url);
+      } else {
+        urlsOrMessages.push(msg.body || msg.content || '');
       }
-
-      if (data && data.reply) {
-        if (data.isImage) {
-          await session.sendImage(cleanNumber, data.reply, 'image', '');
-        } else if (data.isDocument) {
-          await session.sendFile(cleanNumber, data.reply, 'file');
-        } else {
-          await session.sendText(cleanNumber, data.reply);
-        }
-      }
-
-    } catch (err) {
-      console.error(`[${sessionName}] ❌ Erro ao enviar mensagem para /chatbot`, err.message);
-    } finally {
-      await session.stopTyping(cleanNumber);
     }
+    const finalMessage = urlsOrMessages.join(' ');
+    const response = await axios.post('https://core.roktune.com/whatsapp/chatbot', {
+      from: messages[0].from,
+      message: finalMessage,
+      sessionName,
+    });
+
+    const data = response.data;
+    const replies = Array.isArray(data)
+      ? data
+      : Object.values(data).filter((v) => v?.reply);
+
+    for (const reply of replies) {
+      if (reply.isImage) {
+        await session.sendImage(cleanNumber, reply.reply, 'image', '');
+      } else if (reply.isDocument) {
+        await session.sendFile(cleanNumber, reply.reply, 'file');
+      } else {
+        await session.sendText(cleanNumber, reply.reply);
+      }
+    }
+
+    if (data && data.reply && typeof data.reply === 'string') {
+      if (data.isImage) {
+        await session.sendImage(cleanNumber, data.reply, 'image', '');
+      } else if (data.isDocument) {
+        await session.sendFile(cleanNumber, data.reply, 'file');
+      } else {
+        await session.sendText(cleanNumber, data.reply);
+      }
+    }
+
+  } catch (err) {
+    console.error(`[${sessionName}] ❌ Erro no envio em lote:`, err.message);
+  } finally {
+    await session.stopTyping(cleanNumber);
   }
-});
 }
 
 function loadSavedSessions() {

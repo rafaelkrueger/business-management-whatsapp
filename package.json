@@ -13,9 +13,11 @@
     "axios": "^1.8.4",
     "cors": "^2.8.5",
     "express": "^5.1.0",
+    "form-data": "^4.0.4",
     "mime-types": "^3.0.1",
     "multer": "^1.4.5-lts.2",
     "roktune-whatsapp": "file:",
-    "socket.io": "^4.8.1"
+    "socket.io": "^4.8.1",
+    "streamifier": "^0.1.1"
   }
 }
