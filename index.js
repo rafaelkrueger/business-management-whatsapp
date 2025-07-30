@@ -1,4 +1,3 @@
-// Imports
 const express = require('express');
 const http = require('http');
 const socketIO = require('socket.io');
@@ -10,49 +9,22 @@ const axios = require('axios');
 const mime = require('mime-types');
 const multer = require('multer');
 
-// App Setup
 const app = express();
 const server = http.createServer(app);
 const io = socketIO(server, { cors: { origin: '*' } });
 const upload = multer({ dest: 'uploads/' });
 
-// Paths
 const TOKEN_DIR = path.join(__dirname, 'tokens');
-const TRIGGERS_FILE = path.join(__dirname, 'chatbot-triggers.json');
-const FLOWS_FILE = path.join(__dirname, 'chatbot-flows.json');
-
-// Memory States
 const sessions = {};
 const qrCodes = {};
 const tokenTimers = {};
-const chatbotStates = {}; // { phone: { sessionName, flow, stepIndex } }
 
-// Middlewares
 app.use(cors());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static('frontend'));
 
-// Helpers
-const ensureFileExists = (filePath) => {
-  if (!fs.existsSync(filePath)) fs.writeFileSync(filePath, '{}');
-};
-
-const saveToDisk = (filePath, data) => {
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
-};
-
-const loadFromDisk = (filePath) => {
-  try {
-    ensureFileExists(filePath);
-    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
-  } catch {
-    return {};
-  }
-};
-
 const cleanPhoneNumber = (number) => number.replace(/[^\d]/g, '') + '@c.us';
-
 const removeSessionData = (sessionName) => {
   if (sessions[sessionName]) sessions[sessionName].close();
   delete sessions[sessionName];
@@ -69,31 +41,6 @@ const removeSessionData = (sessionName) => {
   }
 };
 
-const executeFlowStep = async (client, from, state) => {
-  const { sessionName, flow, stepIndex } = state;
-  const step = flow[stepIndex];
-  console.log(step);
-  if (!step) {
-    console.log(`[${sessionName}] ✅ Fluxo concluído para ${from}`);
-    delete chatbotStates[from];
-    return;
-  }
-
-  if (step.blockType === 'whatsapp') {
-    await client.sendText(from, step.params.message);
-    console.log(`[${sessionName}] ✉️ Mensagem enviada: ${step.params.message}`);
-    state.stepIndex++;
-    executeFlowStep(client, from, state);
-  } else if (step.blockType === 'waitWhatsapp') {
-    console.log(`[${sessionName}] ⏳ Aguardando nova resposta de ${from}...`);
-  } else {
-    console.warn(`[${sessionName}] ⚠️ Tipo de bloco desconhecido: ${step.blockType}`);
-    state.stepIndex++;
-    executeFlowStep(client, from, state);
-  }
-};
-
-// WhatsApp Session Initialization
 async function initSession(sessionName) {
   if (sessions[sessionName]) return;
 
@@ -107,15 +54,15 @@ async function initSession(sessionName) {
     statusFind: async (status) => {
       if (['isLogged', 'inChat'].includes(status)) {
         clearTimeout(tokenTimers[sessionName]);
-        await axios.post('http://localhost:3005/whatsapp/connected', { sessionName, status: true });
+        await axios.post('https://core.roktune.com/whatsapp/connected', { sessionName, status: true });
       } else if (status === 'notLogged') {
-        await axios.post('http://localhost:3005/whatsapp/disconnected', { sessionName, status: true });
+        await axios.post('https://core.roktune.com/whatsapp/disconnected', { sessionName, status: true });
         removeSessionData(sessionName);
       }
     },
     headless: true,
     puppeteerOptions: {
-      // executablePath: '/usr/bin/chromium-browser',
+      executablePath: '/usr/bin/chromium-browser',
       args: ['--disable-gpu', '--no-sandbox', '--disable-setuid-sandbox', '--single-process'],
     },
     autoClose: false,
@@ -125,7 +72,7 @@ async function initSession(sessionName) {
 
   sessions[sessionName] = client;
 
-client.onMessage(async (message) => {
+  client.onMessage(async (message) => {
   const session = sessions[sessionName];
   const cleanNumber = cleanPhoneNumber(message.chatId);
 
@@ -133,7 +80,7 @@ client.onMessage(async (message) => {
     try {
       await session.startTyping(cleanNumber);
 
-      const res = await axios.post(`http://localhost:3005/whatsapp/chatbot`, {
+      const res = await axios.post(`https://core.roktune.com/whatsapp/chatbot`, {
         from: message.from,
         message: message.content,
         sessionName: sessionName,
@@ -176,10 +123,8 @@ client.onMessage(async (message) => {
     }
   }
 });
-
 }
 
-// Load saved sessions and configurations
 function loadSavedSessions() {
   if (fs.existsSync(TOKEN_DIR)) {
     const sessionsDir = fs.readdirSync(TOKEN_DIR, { withFileTypes: true }).filter(f => f.isDirectory()).map(f => f.name);
@@ -187,29 +132,15 @@ function loadSavedSessions() {
   }
 }
 
-// Routes
 app.post('/session/:name', async (req, res) => {
   const sessionName = req.params.name;
-  if (sessions[sessionName]) return res.status(400).json({ error: 'Sessão já existe.' });
-  await initSession(sessionName);
+  if (sessions[sessionName]){
+    return res.status(400).json({ error: 'Sessão já existe.' })
+  };
+  initSession(sessionName);
   res.status(201).json({ message: `Sessão ${sessionName} criada.` });
 });
 
-app.post('/configure-trigger', (req, res) => {
-  const { sessionName, trigger } = req.body;
-  const triggers = loadFromDisk(TRIGGERS_FILE);
-  triggers[sessionName] = trigger;
-  saveToDisk(TRIGGERS_FILE, triggers);
-  res.status(200).json({ success: true });
-});
-
-app.post('/configure-chatbot', (req, res) => {
-  const { automationId, nodes } = req.body;
-  const flows = loadFromDisk(FLOWS_FILE);
-  flows[automationId] = nodes;
-  saveToDisk(FLOWS_FILE, flows);
-  res.status(200).json({ success: true });
-});
 
 app.post('/send-message', upload.single('image'), async (req, res) => {
   const { sessionName, phone, message } = req.body;
@@ -256,10 +187,7 @@ app.get('/qrcode/:name', (req, res) => {
   res.status(200).json({ qrCode: qrCodes[sessionName] });
 });
 
-// Start
 server.listen(4000, () => {
-  ensureFileExists(TRIGGERS_FILE);
-  ensureFileExists(FLOWS_FILE);
   loadSavedSessions();
   console.log('🚀 Servidor rodando em http://localhost:4000');
 });
